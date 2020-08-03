@@ -10,6 +10,6 @@ A bot to fetch prices for tokens trading on Uniswap. Works for Uniswap V2.
 
 * Set the webhook on your Telegram bot to call the `api/telegram.js` route on your server. Instructions on how to do this can be found [here](https://core.telegram.org/bots/api#setwebhook).
 
-That's it! Now your users can type `/price` in their bot conversation to get your token's real-time price. Add the bot to your group (and make them an admin) to let users do this directly from the group.
+And that's it! Now your users can type `/price` in their bot conversation to get your token's real-time price. Add the bot to your group (and make them an admin) to let users do this directly from the group.
 
 This bot is deployed in the [Cap Telegram Group](https://t.me/capfin).
