@@ -1,64 +1,57 @@
-if (process.env.NODE_ENV == 'development') require('dotenv').config();
+var fetch = require('node-fetch');
 
-const Web3 = require('web3');
-const UniswapPair = require('../abi/UniswapPair.json');
+var query = `query {
+	pool(id: \"0x632f8512166ec65c90a40fd85b8e0d76b2acdd89\") {
+		token0Price
+		token1Price
+		totalValueLockedToken0
+		totalValueLockedToken1
+	}
+}`;
 
-// Your token
-const TOKEN_SYMBOL = 'CAP';
+var queryUSD = `query {
+	pool(id: \"0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8\") {
+		token0Price
+	}
+}`;
+
 const TOKEN_SUPPLY = 100000;
 
-// This is the Uniswap pair contract, not the token's main contract. E.g. https://uniswap.info/pair/0xC169F0eb31403c0bcc43Dc9feCa648A79faFC0F4 for CAP
-const TOKEN_CONTRACT = '0xC169F0eb31403c0bcc43Dc9feCa648A79faFC0F4';
+const getValues = (cb) => {
 
-// Used to convert to USD prices. This is the Uniswap USDC/ETH pair contract.
-const USDC_CONTRACT = '0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc';
+	fetch('https://api.thegraph.com/subgraphs/name/ianlapham/uniswap-v3-testing', {
+	  method: 'POST',
+	  headers: {
+	    'Content-Type': 'application/json',
+	    'Accept': 'application/json',
+	  },
+	  body: JSON.stringify({query})
+	})
+	  .then(r => r.json())
+	  .then(data => {
 
-const getUniswapPrice = (pair, swap, cb) => {
-	
-	const web3 = new Web3(new Web3.providers.HttpProvider('https://mainnet.infura.io/v3/' + process.env.INFURA_TOKEN));
+	  	fetch('https://api.thegraph.com/subgraphs/name/ianlapham/uniswap-v3-testing', {
+		  method: 'POST',
+		  headers: {
+		    'Content-Type': 'application/json',
+		    'Accept': 'application/json',
+		  },
+		  body: JSON.stringify({query: queryUSD})
+		})
+		  .then(r2 => r2.json())
+		  .then(data2 => {
 
-	const contract = new web3.eth.Contract(UniswapPair.abi, pair);
-	
-	contract.methods.getReserves().call({}, (err, data) => {
-		if (err) return cb(err);
-		const { reserve0, reserve1 } = data;
-		cb(null, swap ? reserve1 / reserve0 : reserve0 / reserve1, reserve0, reserve1);
-	});
+		  	cb(null, {
+		  		eth_usd_price: data2.data.pool.token0Price,
+		  		cap_eth_price: data.data.pool.token1Price,
+		  		eth_cap_price: data.data.pool.token0Price,
+		  		cap_locked: data.data.pool.totalValueLockedToken0,
+		  		eth_locked: data.data.pool.totalValueLockedToken1
+		  	});
 
-}
+		  });
 
-const getPrices = function(cb) {
-
-	const regExp = /e-(\d+)/;
-
-	// Get TOKEN price
-	getUniswapPrice(TOKEN_CONTRACT, true, (err, uniswapTokenEth, rTOKEN, rETH) => {
-
-		if (err) return cb(err);
-		
-		uniswapTokenEth = (uniswapTokenEth) ? uniswapTokenEth.toFixed(8) : 0;
-		
-		// Get USDC price
-		getUniswapPrice(USDC_CONTRACT, false, (err, uniswapEthUsdc) => {
-
-			if (err) return cb(err);
-			
-			uniswapEthUsdc = (uniswapEthUsdc) ? (uniswapEthUsdc * 1000000000000).toFixed(2) : 0;
-			
-			let uniswapTokenUsdc = uniswapTokenEth * uniswapEthUsdc;
-			uniswapTokenUsdc = uniswapTokenUsdc.toString().replace(regExp, '');
-			uniswapTokenUsdc = Number(uniswapTokenUsdc).toFixed(4);
-
-			cb(null, {
-				tokeneth: uniswapTokenEth,
-				tokenusdc: uniswapTokenUsdc,
-				rtoken: Math.round(rTOKEN / Math.pow(10,18)),
-				reth: (rETH / Math.pow(10,18)).toFixed(2)
-			});
-
-		});
-	
-	});
+	  });
 
 }
 
@@ -68,29 +61,36 @@ module.exports = (req, res) => {
 
 	if (message && message.text == '/price') {
 
-		getPrices((err, prices) => {
+		getValues((err, values) => {
+
+			console.log(values);
 
 			// Optional: send an error message back to the user here
 			if (err) {
-				console.error('[getPrices ERROR]', err);
+				console.error('[message ERROR]', err);
 				return res.json(true);
 			}
 
-			const { tokeneth, tokenusdc, rtoken, reth } = prices;
+			const { eth_usd_price,
+		  		cap_eth_price,
+		  		eth_cap_price,
+		  		cap_locked,
+		  		eth_locked 
+		  	} = values;
 
-			const ETH_to_TOKEN = Number(1/tokeneth).toFixed(2);
-			const TOKEN_to_ETH = Number(tokeneth).toFixed(4);
-			const mcap = Math.round(tokenusdc * TOKEN_SUPPLY).toLocaleString();
+		  	const cap_usd_price = cap_eth_price * eth_usd_price * 1;
+
+			const mcap = Math.round(cap_usd_price * TOKEN_SUPPLY).toLocaleString();
 
 			res.json({
 				method: 'sendMessage',
 				chat_id: message.chat.id,
 				parse_mode: 'HTML',
-				text: `<code>(${TOKEN_SYMBOL}/USD) $${tokenusdc}</code>
+				text: `<code>(CAP/USD) $${(cap_usd_price*1).toFixed(4)}</code>
 <code>(MCap) $${mcap}</code>
-<code>(Pool) ${rtoken} / ${reth}</code>
-<code>(1 ETH) ${ETH_to_TOKEN} ${TOKEN_SYMBOL}</code>
-<code>(1 ${TOKEN_SYMBOL}) ${TOKEN_to_ETH} ETH</code>`
+<code>(Pool) ${Math.round(cap_locked)} / ${(eth_locked*1).toFixed(2)}</code>
+<code>(1 ETH) ${(eth_cap_price*1).toFixed(2)} CAP</code>
+<code>(1 CAP) ${(cap_eth_price*1).toFixed(4)} ETH</code>`
 			});
 
 		});
@@ -99,4 +99,4 @@ module.exports = (req, res) => {
 		res.json(true);
 	}
 
-}
+};
